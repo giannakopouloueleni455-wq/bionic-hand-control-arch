@@ -2,39 +2,41 @@ import time
 import threading
 from collections import deque
 import numpy as np
+import json
 
-#  1. ΡΥΘΜΙΣΕΙΣ ΠΡΟΣΟΜΟΙΩΣΗΣ 
+# --- 1. ΦΟΡΤΩΣΗ ΕΞΩΤΕΡΙΚΟΥ DATASET ---
+try:
+    with open("dataset.json", "r", encoding="utf-8") as f:
+        OBJECT_DATASET = json.load(f)
+    print(f"Επιτυχής φόρτωση dataset! Καταχωρήθηκαν {len(OBJECT_DATASET)} αντικείμενα.")
+except FileNotFoundError:
+    print("Προσοχή: Δεν βρέθηκε το αρχείο dataset.json! Βεβαιωθείτε ότι το έχετε δημιουργήσει στον ίδιο φάκελο.")
+    OBJECT_DATASET = [{"label": "Default Object", "w": 30, "h": 50, "density": 0.3}]
+
+# --- 2. ΡΥΘΜΙΣΕΙΣ ΠΡΟΣΟΜΟΙΩΣΗΣ ---
 WINDOW_SIZE_MS = 150
 STEP_MS = 50
 SAMPLING_RATE_EMG = 1000  # Hz
 BUFFER_LEN_EMG = int((WINDOW_SIZE_MS / 1000.0) * SAMPLING_RATE_EMG)
 
-# Κυκλικές μνήμες προσομοίωσης
 emg_buffer = deque(maxlen=BUFFER_LEN_EMG)
 sensor_buffer = deque(maxlen=10)
 vision_buffer = deque(maxlen=5)
 
 lock = threading.Lock()
 
-# 2.MOCK HARDWARE
-
+# --- 3. THREADS ΠΡΟΣΟΜΟΙΩΣΗΣ ΥΛΙΚΟΥ ---
 def mock_emg_thread():
-    """Προσομοίωση ροής sEMG στα 1000Hz"""
     while True:
         simulated_frame = np.random.randn(4) * 0.5
         with lock:
             emg_buffer.append(simulated_frame)
         time.sleep(1.0 / SAMPLING_RATE_EMG)
 
-
 def mock_sensors_thread():
-    """Προσομοίωση αισθητήρων (FSR & VL6180X Απόσταση) στα 100Hz"""
     while True:
-        # Τυχαία απόσταση από 1.0 cm έως 15.0 cm
         simulated_distance = round(np.random.uniform(1.0, 15.0), 1)
-        
-        # Τυχαία τιμή πίεσης από 20 έως 400 αν η απόσταση είναι <= 5cm, αλλιώς 0
-        simulated_fsr = float(np.random.randint(20, 400)) if simulated_distance <= 5.0 else 0.0
+        simulated_fsr = float(np.random.randint(50, 350)) if simulated_distance <= 5.0 else 0.0
         
         sensor_data = {
             "distance": simulated_distance,
@@ -46,45 +48,61 @@ def mock_sensors_thread():
         time.sleep(0.01)
 
 def mock_vision_thread():
-    """Προσομοίωση κάμερας (επιστρέφει παραλληλόγραμμο σύλληψης x, y, theta, w, h)"""
+    """Προσομοίωση κάμερας που επιλέγει τυχαία αντικείμενο από το dataset"""
     while True:
+        target = np.random.choice(OBJECT_DATASET)
+        
         simulated_bbox = {
-            "x": 320, "y": 240, "theta": 12.5, "w": 45, "h": 25, 
+            "x": 320, "y": 240, "theta": 10.0, 
+            "w": target["w"] + np.random.randint(-2, 2), 
+            "h": target["h"] + np.random.randint(-2, 2), 
             "valid": True
         }
         with lock:
             vision_buffer.append(simulated_bbox)
         time.sleep(0.05)
 
+# --- 4. ΑΝΑΓΝΩΡΙΣΗ ΚΑΙ ΕΚΤΙΜΗΣΗ ---
+def classify_object_from_dataset(detected_w, detected_h):
+    best_match = None
+    min_error = float('inf')
+    
+    for item in OBJECT_DATASET:
+        error = abs(item["w"] - detected_w) + abs(item["h"] - detected_h)
+        if error < min_error:
+            min_error = error
+            best_match = item
+            
+    return best_match
 
-# 3. SMART GATING
 def evaluate_smart_gating(latest_sensor, latest_vision):
-    """
-    Smart Gating: Εγκρίνει την κίνηση ΜΟΝΟ όταν το αντικείμενο 
-    βρίσκεται σε απόσταση επαφής (<= 5cm) και η κάμερα το επιβεβαιώνει.
-    """
     if not latest_sensor or not latest_vision:
         return False
-    
-    distance_ok = latest_sensor["distance"] <= 5.0
-    object_detected = latest_vision.get("valid", False)
-    
-    return distance_ok and object_detected
+    return latest_sensor["distance"] <= 5.0 and latest_vision.get("valid", False)
 
-# --- 4. ΚΕΝΤΡΙΚΟΣ ΒΡΟΧΟΣ ΠΡΟΣΟΜΟΙΩΣΗΣ (Συνεχής Ροή / Live Loop) ---
-def run_simulation():
-    print("EKKINHSH PROSOMOIOSIS")
+def estimate_weight_and_rigidity(matched_item, latest_sensor):
+    volume = matched_item["w"] * matched_item["h"]
+    weight = round(volume * matched_item["density"], 1)
     
-    # Εκκίνηση νημάτων προσομοίωσης αισθητήρων
+    fsr_value = latest_sensor.get("fsr", 0.0)
+    rigidity = "Rigid / Hard" if fsr_value > 200 else ("Soft / Flexible" if fsr_value > 0 else "No Contact")
+    
+    return weight, rigidity
+
+# --- 5. ΚΕΝΤΡΙΚΟΣ ΒΡΟΧΟΣ ---
+def run_simulation():
+    print("--- EKKINHSH PROSOMOIOSIS ΜΕ ΝΕΟ DATASET (Στυλό, Μπάλα, Κινητό) ---")
+    print("--- (Πατήστε Ctrl+C για τερματισμό) ---\n")
+    
     threading.Thread(target=mock_emg_thread, daemon=True).start()
     threading.Thread(target=mock_sensors_thread, daemon=True).start()
     threading.Thread(target=mock_vision_thread, daemon=True).start()
 
-    step_interval = STEP_MS / 1000.0  # 50 ms
+    step_interval = STEP_MS / 1000.0
     cycle_count = 0
 
     try:
-        while True: # Τρέχει συνεχώς 
+        while True:
             loop_start = time.time()
             cycle_count += 1
             
@@ -96,23 +114,25 @@ def run_simulation():
                     time.sleep(0.01)
                     continue
 
-            # Έλεγχος Smart Gating
+            matched_obj = classify_object_from_dataset(latest_vision["w"], latest_vision["h"])
+            weight, rigidity = estimate_weight_and_rigidity(matched_obj, latest_sensor)
             gating_approved = evaluate_smart_gating(latest_sensor, latest_vision)
 
-            print(f"[Cycle {cycle_count}] Distance: {latest_sensor['distance']} cm | FSR: {latest_sensor['fsr']}")
+            print(f"[Cycle {cycle_count}] Distance: {latest_sensor['distance']} cm | Measured (w:{latest_vision['w']}, h:{latest_vision['h']})")
+            print(f"  -> Detected Object: **{matched_obj['label']}** | Est. Weight: {weight} g | Texture: {rigidity}")
+            
             if gating_approved:
-                print("  -> [SMART GATING: APPROVED] Object in touch range! Motor action triggered.")
+                print("  -> [SMART GATING: APPROVED] Action triggered with customized grip!")
             else:
-                print("  -> [SMART GATING: BLOCKED] Movement prevented (Object too far or missing).")
-            print("-" * 60)
+                print("  -> [SMART GATING: BLOCKED] Movement prevented (Out of reach).")
+            print("-" * 75)
 
-            # Χρονικός σχεδιασμός βήματος (50 ms)
             elapsed = time.time() - loop_start
             if elapsed < step_interval:
                 time.sleep(step_interval - elapsed)
                 
     except KeyboardInterrupt:
-        print(f"\n--- H prosomoiosi stamatise apo ton xristi ston kyklos {cycle_count} ---")
+        print(f"\n--- Η προσομοίωση σταμάτησε στον κύκλο {cycle_count} ---")
 
 if __name__ == "__main__":
     run_simulation()
