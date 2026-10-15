@@ -4,16 +4,17 @@ from collections import deque
 import numpy as np
 import json
 
-# --- 1. ΦΟΡΤΩΣΗ ΕΞΩΤΕΡΙΚΟΥ DATASET ---
+#  1. ΦΟΡΤΩΣΗ  DATASET 
 try:
     with open("dataset.json", "r", encoding="utf-8") as f:
         OBJECT_DATASET = json.load(f)
-    print(f"Επιτυχής φόρτωση dataset! Καταχωρήθηκαν {len(OBJECT_DATASET)} αντικείμενα.")
 except FileNotFoundError:
-    print("Προσοχή: Δεν βρέθηκε το αρχείο dataset.json! Βεβαιωθείτε ότι το έχετε δημιουργήσει στον ίδιο φάκελο.")
+    print(" Δεν βρέθηκε το αρχείο dataset.json! .")
     OBJECT_DATASET = [{"label": "Default Object", "w": 30, "h": 50, "density": 0.3}]
 
-# --- 2. ΡΥΘΜΙΣΕΙΣ ΠΡΟΣΟΜΟΙΩΣΗΣ ---
+
+
+#  2. ΡΥΘΜΙΣΕΙΣ ΠΡΟΣΟΜΟΙΩΣΗΣ 
 WINDOW_SIZE_MS = 150
 STEP_MS = 50
 SAMPLING_RATE_EMG = 1000  # Hz
@@ -25,7 +26,7 @@ vision_buffer = deque(maxlen=5)
 
 lock = threading.Lock()
 
-# --- 3. THREADS ΠΡΟΣΟΜΟΙΩΣΗΣ ΥΛΙΚΟΥ ---
+#  3.ΨΕΥΤΙΚΑ ΔΕΔΟΜΕΝΑ
 def mock_emg_thread():
     while True:
         simulated_frame = np.random.randn(4) * 0.5
@@ -62,7 +63,8 @@ def mock_vision_thread():
             vision_buffer.append(simulated_bbox)
         time.sleep(0.05)
 
-# --- 4. ΑΝΑΓΝΩΡΙΣΗ ΚΑΙ ΕΚΤΙΜΗΣΗ ---
+
+# 4. ΑΝΑΓΝΩΡΙΣΗ ΚΑΙ ΕΚΤΙΜΗΣΗ 
 def classify_object_from_dataset(detected_w, detected_h):
     best_match = None
     min_error = float('inf')
@@ -89,10 +91,12 @@ def estimate_weight_and_rigidity(matched_item, latest_sensor):
     
     return weight, rigidity
 
-# --- 5. ΚΕΝΤΡΙΚΟΣ ΒΡΟΧΟΣ ---
+
+
+#  5. ΚΕΝΤΡΙΚΗ ΛΕΙΡΟΥΡΓΙΑ
 def run_simulation():
-    print("--- EKKINHSH PROSOMOIOSIS ΜΕ ΝΕΟ DATASET (Στυλό, Μπάλα, Κινητό) ---")
-    print("--- (Πατήστε Ctrl+C για τερματισμό) ---\n")
+    print(" EKKINHSH PROSOMOIOSIS ME DATASET ")
+  
     
     threading.Thread(target=mock_emg_thread, daemon=True).start()
     threading.Thread(target=mock_sensors_thread, daemon=True).start()
@@ -101,8 +105,8 @@ def run_simulation():
     step_interval = STEP_MS / 1000.0
     cycle_count = 0
 
-    try:
-        while True:
+    
+    while True:
             loop_start = time.time()
             cycle_count += 1
             
@@ -124,15 +128,14 @@ def run_simulation():
             if gating_approved:
                 print("  -> [SMART GATING: APPROVED] Action triggered with customized grip!")
             else:
-                print("  -> [SMART GATING: BLOCKED] Movement prevented (Out of reach).")
+                print("  -> [SMART GATING: BLOCKED] Movement rejected (Out of reach).")
             print("-" * 75)
 
             elapsed = time.time() - loop_start
             if elapsed < step_interval:
                 time.sleep(step_interval - elapsed)
                 
-    except KeyboardInterrupt:
-        print(f"\n--- Η προσομοίωση σταμάτησε στον κύκλο {cycle_count} ---")
+
 
 if __name__ == "__main__":
     run_simulation()
